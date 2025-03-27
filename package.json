@@ -1,7 +1,7 @@
 {
-  "main": "node_modules/expo/AppEntry.js",
+  "main": "dist/index.js",
   "name": "highcharts-react-native",
-  "version": "3.1.7",
+  "version": "3.2.0",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
@@ -32,21 +32,21 @@
   ],
   "homepage": "https://github.com/highcharts/highcharts-react-native#readme",
   "dependencies": {
-    "expo": "~38.0.8",
-    "react": "~16.11.0",
-    "react-dom": "~16.11.0",
-    "react-native": "https://github.com/expo/react-native/archive/sdk-38.0.2.tar.gz",
-    "react-native-web": "~0.11.7",
-    "react-native-webview": "10.6.0",
-    "@highcharts/highcharts-react-native": "./dist/"
+    "@highcharts/highcharts-react-native": "./dist/",
+    "expo": "~52.0.38",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-native": "0.76.7",
+    "react-native-web": "0.19.13",
+    "react-native-webview": "13.12.5"
   },
   "devDependencies": {
-    "@babel/core": "^7.8.6",
-    "babel-preset-expo": "~8.1.0",
+    "@babel/core": "^7.26.9",
+    "babel-preset-expo": "~9.4.0",
     "del": "^6.0.0",
     "gulp": "^4.0.2",
     "gulp-rename": "^2.0.0",
-    "highcharts": "^9.0.1"
+    "highcharts": "^12.1.2"
   },
   "private": true
 }
