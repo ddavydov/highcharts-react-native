@@ -17,6 +17,7 @@ gulp.task('update-highcharts', async function() {
 
     gulp.src([
         CORE_FILES_PATH + 'highcharts.js',
+        CORE_FILES_PATH + 'highstock.js',
         CORE_FILES_PATH + 'highcharts-more.js',
         CORE_FILES_PATH + 'highcharts-3d.js',
         ...moduleFiles
