@@ -27,6 +27,17 @@
 			user-select: none;
 		}
 	</style>
+	<script
+		src="https://js.sentry-cdn.com/6d6e9d69753e5d06ee04608eb803cd6f.min.js"
+		crossorigin="anonymous"
+	></script>
+	<script>
+		Sentry.onLoad(function() {
+		  Sentry.init({
+			  // You can add any additional configuration here
+			});
+		});
+	  </script>
     <script>
 		const hcUtils = {
 		    // convert string to JSON, including functions.
