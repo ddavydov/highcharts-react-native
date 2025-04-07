@@ -1,253 +1,253 @@
 import React from 'react';
-import {
-    View,
-    Dimensions,
-    StyleSheet,
-    ActivityIndicator
-} from 'react-native';
+import { View, Dimensions, StyleSheet, ActivityIndicator } from 'react-native';
 import { WebView } from 'react-native-webview';
-import * as FileSystem from 'expo-file-system';
-import { Asset } from 'expo-asset';
-import HighchartsModules from './HighchartsModules';
+
+// Import Highcharts scripts directly as strings using babel-plugin-inline-import
+import highchartsCore from '../highcharts-files/highcharts.hcscript';
+import highstock from '../highcharts-files/highstock.hcscript';
+import highchartsMore from '../highcharts-files/highcharts-more.hcscript';
+import highcharts3d from '../highcharts-files/highcharts-3d.hcscript';
+
+// Import module scripts
+import boostModule from '../highcharts-files/modules/boost.hcscript';
+import exportingModule from '../highcharts-files/modules/exporting.hcscript';
+import solidGaugeModule from '../highcharts-files/modules/solid-gauge.hcscript';
+// Import other modules as needed
+
+// Create a module map for easy access
+const MODULES = {
+  boost: boostModule,
+  exporting: exportingModule,
+  'solid-gauge': solidGaugeModule,
+  // Add other modules to the map
+};
 
 const win = Dimensions.get('window');
-const stringifiedScripts = {};
 
-let cdnPath = 'code.highcharts.com/';
-let httpProto = 'http://';
+// HTML layout as a string
+const LAYOUT_HTML = `<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=0" />
+    <style>
+      html, body {
+        background-color: 'transparent';
+      }
+      #container {
+        background-color: 'transparent';
+        width:100%;
+        height:100%;
+        top:0;
+        left:0;
+        right:0;
+        bottom:0;
+        position:absolute;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      * {
+          -webkit-touch-callout: none;
+          -webkit-user-select: none; /* Disable selection/copy in UIWebView */
+          -khtml-user-select: none;
+          -moz-user-select: none;
+          -ms-user-select: none;
+          user-select: none;
+      }
+    </style>
+    <script>
+      const hcUtils = {
+          // convert string to JSON, including functions.
+          parseOptions: function (chartOptions) {
+              const parseFunction = this.parseFunction;
+
+              const options = JSON.parse(chartOptions, function (val, key) {
+                  if (typeof key === 'string' && key.indexOf('function') > -1) {
+                      return parseFunction(key);
+                  } else {
+                      return key;
+                  }
+              });
+
+              return options;
+          },
+          // convert funtion string to function
+          parseFunction: function (fc) {
+              const fcArgs = fc.match(/\\((.*?)\\)/)[1],
+                  fcbody = fc.split('{');
+
+              return new Function(fcArgs, '{' + fcbody.slice(1).join('{'));
+          }
+      };
+
+      // Communication between React app and webview. Receive chart options as string.
+      document.addEventListener('message', function (data) {
+          Highcharts.charts[0].update(
+            hcUtils.parseOptions(data.data),
+            true,
+            true,
+            true
+          );
+      });
+
+      window.addEventListener('message', function (data) {
+          Highcharts.charts[0].update(
+            hcUtils.parseOptions(data.data),
+            true,
+            true,
+            true
+          );
+      });
+    </script>
+  </head>
+  <body>
+    <div id="container"></div>
+  </body>
+</html>`;
 
 export default class HighchartsReactNative extends React.PureComponent {
-    static getDerivedStateFromProps(props, state) {
-        let width = Dimensions.get('window').width;
-        let height =  Dimensions.get('window').height;
-        if(!!props.styles) {
-            const userStyles = StyleSheet.flatten(props.styles);
-            const {width: w, height: h} = userStyles;
-            width = w;
-            height = h;
-        }
-        return {
-            width: width,
-            height: height
-        };
+  static getDerivedStateFromProps(props, state) {
+    let width = Dimensions.get('window').width;
+    let height = Dimensions.get('window').height;
+    if (!!props.styles) {
+      const userStyles = StyleSheet.flatten(props.styles);
+      const { width: w, height: h } = userStyles;
+      width = w;
+      height = h;
+    }
+    return {
+      width: width,
+      height: height,
+    };
+  }
+
+  constructor(props) {
+    super(props);
+
+    // Extract width and height from user styles
+    const userStyles = StyleSheet.flatten(props.styles);
+
+    this.state = {
+      width: userStyles.width || win.width,
+      height: userStyles.height || win.height,
+      chartOptions: props.options,
+      modules: props.modules || [],
+      setOptions: props.setOptions || {},
+      renderedOnce: false,
+      useHighstock: props.useHighstock || false,
+    };
+
+    this.webviewRef = null;
+  }
+
+  componentDidUpdate() {
+    this.webviewRef && this.webviewRef.postMessage(this.serialize(this.props.options, true));
+  }
+
+  componentDidMount() {
+    this.setState({ renderedOnce: true });
+  }
+
+  /**
+   * Convert JSON to string. When is updated, functions (like events.load)
+   * is not wrapped in quotes.
+   */
+  serialize(chartOptions, isUpdate) {
+    var hcFunctions = {},
+      serializedOptions,
+      i = 0;
+
+    serializedOptions = JSON.stringify(chartOptions, function (val, key) {
+      var fcId = '###HighchartsFunction' + i + '###';
+
+      // set reference to function for the later replacement
+      if (typeof key === 'function') {
+        hcFunctions[fcId] = key.toString();
+        i++;
+        return isUpdate ? key.toString() : fcId;
+      }
+
+      return key;
+    });
+
+    // replace ids with functions.
+    if (!isUpdate) {
+      Object.keys(hcFunctions).forEach(function (key) {
+        serializedOptions = serializedOptions.replace('"' + key + '"', hcFunctions[key]);
+      });
     }
 
-    setHcAssets = async (useCDN) => {
-        try {
-            await this.setLayout()
-            // Determine which base chart type to load
-            if (this.state.useHighstock) {
-                await this.addScript('highstock', null, useCDN)
-            } else {
-                await this.addScript('highcharts', null, useCDN)
-            }
-            await this.addScript('highcharts-more', null, useCDN)
-            await this.addScript('highcharts-3d', null, useCDN)
-            for (const mod of this.state.modules) {
-                await this.addScript(mod, true, useCDN)
-            }
-            this.setState({
-                hcModulesReady: true
-            })
-        } catch (error) {
-            console.error("Failed to fetch scripts or layout. " + error.message)
-        }
-    }
-    
-    getAssetAsString = async (asset) => {
-        const downloadedModules = await FileSystem.readDirectoryAsync(FileSystem.cacheDirectory)
-        let fileName = 'ExponentAsset-' + asset.hash + '.' + asset.type
+    return serializedOptions;
+  }
 
-        if (!downloadedModules.includes(fileName)) {
-            await asset.downloadAsync()
-        }
+  render() {
+    const { useHighstock, setOptions, modules } = this.state;
+    const chartConstructor = useHighstock ? 'stockChart' : 'chart';
 
-        return await FileSystem.readAsStringAsync(FileSystem.cacheDirectory + fileName)
-    }
+    // Select the appropriate core library
+    const coreScript = useHighstock ? highstock : highchartsCore;
 
-    addScript = async (name, isModule, useCDN) => {
-        if(useCDN) {
-            const response = await fetch(
-                httpProto + cdnPath + (isModule ? 'modules/' : '') + name + '.js'
-            ).catch((error) => {
-                throw error
-            })
-            stringifiedScripts[name] = await response.text()
-        } else {
-            const script = Asset.fromModule(
-                isModule &&
-                name !== 'highcharts-more' &&
-                name !== 'highcharts-3d' ?
-                HighchartsModules.modules[name] : HighchartsModules[name]
-            )
-            stringifiedScripts[name] = await this.getAssetAsString(script)
-        }
-    }
-
-    setLayout = async () => {
-        const indexHtml = Asset.fromModule(require('../highcharts-layout/index.html'))
-
-        this.setState({
-            layoutHTML: await this.getAssetAsString(indexHtml)
+    // Build the injected JavaScript
+    const runFirst = `
+      window.data = "${this.props.data ? this.props.data : null}";
+      
+      // Base chart library (Highcharts or Highstock)
+      ${coreScript}
+      
+      // Highcharts More
+      ${highchartsMore}
+      
+      // Highcharts 3D
+      ${highcharts3d}
+      
+      // Modules
+      ${modules
+        .map(moduleName => {
+          const moduleScript = MODULES[moduleName];
+          return moduleScript
+            ? `
+          // ${moduleName} module
+          ${moduleScript}
+        `
+            : '';
         })
-    }
+        .join('\n')}
+      
+      // Set Highcharts options and render chart
+      Highcharts.setOptions(${this.serialize(setOptions)});
+      Highcharts.${chartConstructor}("container", ${this.serialize(this.props.options)});
+    `;
 
-    constructor(props) {
-        super(props);
-
-        if (props.useSSL) {
-            httpProto = 'https://';
-        }
-
-        if (typeof props.useCDN === 'string') {
-            cdnPath = props.useCDN;
-        }
-
-        // extract width and height from user styles
-        const userStyles = StyleSheet.flatten(props.styles);
-
-        this.state = {
-            width: userStyles.width || win.width,
-            height: userStyles.height || win.height,
-            chartOptions: props.options,
-            useCDN: props.useCDN || false,
-            modules: props.modules || [],
-            setOptions: props.setOptions || {},
-            renderedOnce: false,
-            hcModulesReady: false,
-            useHighstock: props.useHighstock || false // Add useHighstock flag
-        };
-        this.webviewRef = null
-
-        this.setHcAssets(this.state.useCDN)
-    }
-    
-    componentDidUpdate() {
-        this.webviewRef && this.webviewRef.postMessage(this.serialize(this.props.options, true));
-    }
-    
-    componentDidMount() {
-        this.setState({ renderedOnce: true });
-    }
-    
-    /**
-     * Convert JSON to string. When is updated, functions (like events.load) 
-     * is not wrapped in quotes.
-     */
-    serialize(chartOptions, isUpdate) {
-        var hcFunctions = {},
-            serializedOptions,
-            i = 0;
-
-        serializedOptions = JSON.stringify(chartOptions, function (val, key) {
-            var fcId = '###HighchartsFunction' + i + '###';
-
-            // set reference to function for the later replacement
-            if (typeof key === 'function') {
-                hcFunctions[fcId] = key.toString();
-                i++;
-                return isUpdate ? key.toString() : fcId;
-            }
-
-            return key;
-        });
-
-        // replace ids with functions.
-        if (!isUpdate) {
-            Object.keys(hcFunctions).forEach(function (key) {
-                serializedOptions = serializedOptions.replace(
-                    '"' + key + '"',
-                    hcFunctions[key]
-                );
-            });
-        }
-
-        return serializedOptions;
-    }
-    
-    render() {
-        if (this.state.hcModulesReady) {
-            const setOptions = this.state.setOptions;
-            const useHighstock = this.state.useHighstock;
-            const chartConstructor = useHighstock ? 'stockChart' : 'chart'; // Determine chart constructor
-            
-            const runFirst = `
-                window.data = \"${this.props.data ? this.props.data : null}\";
-                var modulesList = ${JSON.stringify(this.state.modules)};
-                var readable = ${JSON.stringify(stringifiedScripts)};
-                var chartConstructor = "${chartConstructor}";
-
-                function loadScripts(file, callback, redraw) {
-                    var hcScript = document.createElement('script');
-                    hcScript.innerHTML = readable[file]
-                    document.body.appendChild(hcScript);
-
-                    if (callback) {
-                        callback.call();
-                    }
-
-                    if (redraw) {
-                        Highcharts.setOptions(${this.serialize(setOptions)});
-                        Highcharts.${chartConstructor}("container", ${this.serialize(this.props.options)});
-                    }
-                }
-
-                // First script should be either highcharts or highstock
-                var baseScript = "${useHighstock ? 'highstock' : 'highcharts'}";
-                
-                loadScripts(baseScript, function () {
-                    var redraw = modulesList.length > 0 ? false : true;
-                    loadScripts('highcharts-more', function () {
-                        if (modulesList.length > 0) {
-                            for (var i = 0; i < modulesList.length; i++) {
-                                if (i === (modulesList.length - 1)) {
-                                    redraw = true;
-                                } else {
-                                    redraw = false;
-                                }
-                                loadScripts(modulesList[i], undefined, redraw, true);
-                            }
-                        }
-                    }, redraw);
-                }, false);
-            `;
-
-            // Create container for the chart
-            return (
-                <View
-                    style={[
-                        this.props.styles,
-                        { width: this.state.width, height: this.state.height }
-                    ]}
-                >
-                    <WebView
-                        ref={ref => {this.webviewRef = ref}}
-                        onMessage = {this.props.onMessage ? (event) => this.props.onMessage(event.nativeEvent.data) : () => {}}
-                        source = {
-                            {
-                                html: this.state.layoutHTML
-                            }
-                        }
-                        injectedJavaScript={runFirst}
-                        originWhitelist={["*"]}
-                        automaticallyAdjustContentInsets={true}
-                        allowFileAccess={true}
-                        javaScriptEnabled={true}
-                        domStorageEnabled={true}
-                        useWebKit={true}
-                        scrollEnabled={false}
-                        mixedContentMode='always'
-                        allowFileAccessFromFileURLs={true}
-                        startInLoadingState = {this.props.loader}
-                        style={this.props.webviewStyles}
-                        androidHardwareAccelerationDisabled
-                        renderLoading={() => <View><ActivityIndicator size="small" color="#dfdfdf" /></View>}
-                        {...this.props.webviewProps}
-                    />
-                </View>
-            )
-        } else {
-            return <View></View>
-        }
-    }
+    return (
+      <View style={[this.props.styles, { width: this.state.width, height: this.state.height }]}>
+        <WebView
+          ref={ref => {
+            this.webviewRef = ref;
+          }}
+          onMessage={this.props.onMessage ? event => this.props.onMessage(event.nativeEvent.data) : () => {}}
+          source={{
+            html: LAYOUT_HTML,
+          }}
+          injectedJavaScript={runFirst}
+          originWhitelist={['*']}
+          automaticallyAdjustContentInsets={true}
+          allowFileAccess={true}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+          useWebKit={true}
+          scrollEnabled={false}
+          mixedContentMode="always"
+          allowFileAccessFromFileURLs={true}
+          startInLoadingState={this.props.loader}
+          style={this.props.webviewStyles}
+          androidHardwareAccelerationDisabled
+          renderLoading={() => (
+            <View>
+              <ActivityIndicator size="small" color="#dfdfdf" />
+            </View>
+          )}
+          {...this.props.webviewProps}
+        />
+      </View>
+    );
+  }
 }
